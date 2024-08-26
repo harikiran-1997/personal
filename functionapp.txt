@@ -1,0 +1,197 @@
+trigger:
+- none
+
+pool:
+  name: HBC-INTERNAL
+
+parameters:
+- name: Windowsfunctionapp
+  type: boolean
+  default: true
+- name: Linuxfunctionapp
+  type: boolean
+  default: false
+
+- name: Tfkeyvaultname
+  type: string
+  default: 'corpservicesdevtfkv'
+  values:
+  - corpservicesdevtfkv
+  - corpservicesprdtfkv
+  - hbusedvfotfkv
+  - hbusepdfotfkv
+  - userisktfkv
+  - hbusetrstfkv
+- name: serviceConnection
+  type: string
+  default: 'HBCM-CORP-SERVICES-DEVELOPMENT-TERRAFORM'
+  values:
+  - HBCM-CORP-SERVICES-DEVELOPMENT-TERRAFORM
+  - HBCM-CORP-SERVICES-PRODUCTION-TERRAFORM
+  - HBCM-FRONT-OFFICE-DEVUAT-TERRAFORM
+  - HBCM-FRONT-OFFICE-PRODUCTION-TERRAFORM
+  - HBCM-RISK-TERRAFORM
+  - HBCM-TREASURY-TERRAFORM
+- name:  backendAzureRmResourceGroupName
+  type: string
+  default: 'HB-USEDV-TFSTATE-RG01'
+  values:
+  - HB-USEDV-TFSTATE-RG01
+  - hb-usepd-cs-TFSTATE-RG01
+  - HB-USEDV-TERRAFORM-RG01
+  - HB-USEPD-TERRAFORM-RG01
+  - USE-RISK-TFSTATE-RG01
+  - hb-use-trs-TERRAFORM-RG01  
+- name:  backendAzureRmStorageAccountName
+  type: string
+  default: 'corpservicesdevtfstate'
+  values:
+  - corpservicesdevtfstate
+  - corpservicesprdtfstate
+  - hbusedvfotfstate
+  - hbusepdfotfstate
+  - userisktfstate
+  - hbusetrstfstate
+- name: backendAzureRmContainerName
+  type: string
+  default: 'tfstate'
+  values:
+  - tfstate
+- name: backendAzureRmKeyFunctApp
+  type: string
+  default: ''
+- name: tfDestroy
+  type: boolean
+  default: false
+- name: environment
+  type: string
+  default: 'corp-svcs-dev' 
+  values:
+  - corp-svcs-dev
+  - corp-svcs-uat
+  - corp-svcs-prod
+  - front-office-dev
+  - front-office-uat
+  - front-office-prod
+  - use-risk-dev
+  - treasury-dev
+  - treasury-uat
+  - treasury-prod
+- name: pep_subnetrgname
+  type: string
+  default: ''
+- name: PEPfunappSubnet_name
+  type: string
+  default: ''
+- name: functionapp_storageaccount_name
+  type: string
+  default: ''
+- name: functionapp_rgname
+  type: string
+  default: ''
+- name: function_appname
+  type: string
+  default: ''
+- name: functionapp_PEP
+  type: string
+  default: ''
+- name: storageaccount_pep
+  type: string
+  default: ''
+- name: dotnet_version
+  type: string
+  default: ''
+
+
+variables:
+  backendstorageaccountname: '${{ parameters.backendAzureRmStorageAccountName }}'
+  backendrgname: '${{ parameters.backendAzureRmResourceGroupName }}'
+  backendcontainername: '${{ parameters.backendAzureRmContainerName }}'
+  backendkeyFunctApp: '${{ parameters.backendAzureRmKeyFunctApp }}'
+  pep_subnetrgname: '${{ parameters.pep_subnetrgname }}'
+  PEPfunappSubnet_name: '${{ parameters.PEPfunappSubnet_name }}'
+  functionapp_rgname: '${{ parameters.functionapp_rgname }}'
+  function_appname: '${{ parameters.function_appname }}'
+  functionapp_PEP: '${{ parameters.functionapp_PEP }}'
+  storageaccount_pep: '${{ parameters.storageaccount_pep }}'
+  functionapp_storageaccount_name: '${{ parameters.functionapp_storageaccount_name }}'
+  dotnet_version: '${{ parameters.dotnet_version }}'
+
+name: Terraform_Onboarding_${{ parameters.environment }}_AzureInfrastructure_TFSTATEFILES_$(backendkeyFunctApp)_On_$(Date:yyyyMMdd)$(Rev:.r)
+stages:
+ - stage: ProvisionFunctionApp
+   jobs:
+    - job: 
+      timeoutInMinutes: 0
+      steps:
+      - task: AzureKeyVault@2
+        inputs:
+          azureSubscription: '${{ parameters.serviceConnection }}'
+          KeyVaultName: '${{ parameters.Tfkeyvaultname }}'
+          SecretsFilter: 'ApplicationID,SecretValue,SubscriptionID,TenantID,HubSubscriptionID'
+          RunAsPreJob: false
+          
+      - task: JasonBJohnson.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@0
+        inputs:
+          terraformVersion: 'latest'
+   
+ 
+      - task: TerraformTaskV2@2
+        displayName: 'Terraform Init'
+        inputs:
+          command: 'init'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/PostInfra/WindowsFunctionApp'
+          backendServiceArm: '${{ parameters.serviceConnection }}'
+          backendAzureRmResourceGroupName: '${{ parameters.backendAzureRmResourceGroupName }}'
+          backendAzureRmStorageAccountName: '${{ parameters.backendAzureRmStorageAccountName }}'
+          backendAzureRmContainerName: '${{ parameters.backendAzureRmContainerName }}'
+          backendAzureRmKey: '$(backendkeyFunctApp)'
+        condition: eq('${{ parameters.Windowsfunctionapp }}', true) 
+
+
+      - task: TerraformTaskV2@2
+        inputs:
+          provider: 'azurerm'
+          command: 'apply'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/PostInfra/WindowsFunctionApp'
+          commandOptions: '-var-file="$(System.DefaultWorkingDirectory)/Aksdeploy/environments/${{ parameters.environment }}/${{ parameters.environment }}.tfvars" -lock=false  -var azure_tenant_id=$(TenantID) -var azure_subscription_id=$(SubscriptionID) -var azure_client_id=$(ApplicationID) -var azure_client_secret=$(SecretValue) -var backend_resource_group_name=$(backendrgname) -var backend_storage_account_name=$(backendstorageaccountname) -var backend_container_name=$(backendcontainername) -var backend_key=$(backendkeyAKV) -var HUB_subscription_id=$(HubSubscriptionID) -var pep_subnetrgname=$(pep_subnetrgname) -var PEPfunappSubnet_name=$(PEPfunappSubnet_name) -var functionapp_rgname=$(functionapp_rgname) -var function_appname=$(function_appname) -var functionapp_PEP=$(functionapp_PEP) -var storageaccount_pep=$(storageaccount_pep) -var functionapp_storageaccount_name=$(functionapp_storageaccount_name) -var dotnet_version=$(dotnet_version)'
+          environmentServiceNameAzureRM: '${{ parameters.serviceConnection }}'
+        condition: and(eq('${{ parameters.tfDestroy }}', false), eq('${{ parameters.Windowsfunctionapp }}', true)) 
+
+      - task: TerraformTaskV2@2
+        displayName: 'Terraform Destroy'
+        inputs:
+          command: 'destroy'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/PostInfra/WindowsFunctionApp'
+          commandOptions: '-var-file="$(System.DefaultWorkingDirectory)/Aksdeploy/environments/${{ parameters.environment }}/${{ parameters.environment }}.tfvars" -lock=false  -var azure_tenant_id=$(TenantID) -var azure_subscription_id=$(SubscriptionID) -var azure_client_id=$(ApplicationID) -var azure_client_secret=$(SecretValue) -var backend_resource_group_name=$(backendrgname) -var backend_storage_account_name=$(backendstorageaccountname) -var backend_container_name=$(backendcontainername) -var backend_key=$(backendkeyAKV) -var HUB_subscription_id=$(HubSubscriptionID) -var pep_subnetrgname=$(pep_subnetrgname) -var PEPfunappSubnet_name=$(PEPfunappSubnet_name) -var functionapp_rgname=$(functionapp_rgname) -var function_appname=$(function_appname) -var functionapp_PEP=$(functionapp_PEP) -var storageaccount_pep=$(storageaccount_pep) -var functionapp_storageaccount_name=$(functionapp_storageaccount_name) -var dotnet_version=$(dotnet_version)'
+          environmentServiceNameAzureRM: '${{ parameters.serviceConnection }}'
+        condition: eq('${{ parameters.tfDestroy }}', true) 
+      - task: TerraformTaskV2@2
+        displayName: 'Terraform Init'
+        inputs:
+          command: 'init'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/PostInfra/LinuxFunctionapp'
+          backendServiceArm: '${{ parameters.serviceConnection }}'
+          backendAzureRmResourceGroupName: '${{ parameters.backendAzureRmResourceGroupName }}'
+          backendAzureRmStorageAccountName: '${{ parameters.backendAzureRmStorageAccountName }}'
+          backendAzureRmContainerName: '${{ parameters.backendAzureRmContainerName }}'
+          backendAzureRmKey: '$(backendkeyFunctApp)'
+        condition: eq('${{ parameters.Linuxfunctionapp }}', true) 
+
+      - task: TerraformTaskV2@2
+        inputs:
+          provider: 'azurerm'
+          command: 'apply'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/PostInfra/LinuxFunctionapp'
+          commandOptions: '-var-file="$(System.DefaultWorkingDirectory)/Aksdeploy/environments/${{ parameters.environment }}/${{ parameters.environment }}.tfvars" -lock=false  -var azure_tenant_id=$(TenantID) -var azure_subscription_id=$(SubscriptionID) -var azure_client_id=$(ApplicationID) -var azure_client_secret=$(SecretValue) -var backend_resource_group_name=$(backendrgname) -var backend_storage_account_name=$(backendstorageaccountname) -var backend_container_name=$(backendcontainername) -var backend_key=$(backendkeyAKV) -var HUB_subscription_id=$(HubSubscriptionID) -var pep_subnetrgname=$(pep_subnetrgname) -var PEPfunappSubnet_name=$(PEPfunappSubnet_name) -var functionapp_rgname=$(functionapp_rgname) -var function_appname=$(function_appname) -var functionapp_PEP=$(functionapp_PEP) -var storageaccount_pep=$(storageaccount_pep) -var functionapp_storageaccount_name=$(functionapp_storageaccount_name) -var dotnet_version=$(dotnet_version)'
+          environmentServiceNameAzureRM: '${{ parameters.serviceConnection }}'
+        condition: and(eq('${{ parameters.tfDestroy }}', false), eq('${{ parameters.Linuxfunctionapp }}', true)) 
+
+      - task: TerraformTaskV2@2
+        displayName: 'Terraform Destroy'
+        inputs:
+          command: 'destroy'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/PostInfra/LinuxFunctionapp'
+          commandOptions: '-var-file="$(System.DefaultWorkingDirectory)/Aksdeploy/environments/${{ parameters.environment }}/${{ parameters.environment }}.tfvars" -lock=false  -var azure_tenant_id=$(TenantID) -var azure_subscription_id=$(SubscriptionID) -var azure_client_id=$(ApplicationID) -var azure_client_secret=$(SecretValue) -var backend_resource_group_name=$(backendrgname) -var backend_storage_account_name=$(backendstorageaccountname) -var backend_container_name=$(backendcontainername) -var backend_key=$(backendkeyAKV) -var HUB_subscription_id=$(HubSubscriptionID) -var pep_subnetrgname=$(pep_subnetrgname) -var PEPfunappSubnet_name=$(PEPfunappSubnet_name) -var functionapp_rgname=$(functionapp_rgname) -var function_appname=$(function_appname) -var functionapp_PEP=$(functionapp_PEP) -var storageaccount_pep=$(storageaccount_pep) -var functionapp_storageaccount_name=$(functionapp_storageaccount_name) -var dotnet_version=$(dotnet_version)'
+          environmentServiceNameAzureRM: '${{ parameters.serviceConnection }}'
+        condition: eq('${{ parameters.tfDestroy }}', true) 
